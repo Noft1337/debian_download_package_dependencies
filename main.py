@@ -24,7 +24,6 @@ try:
     DISTRO = distro.name().lower().split()[0]
 except IndexError:
     DISTRO = ''
-print(f"Running {NAME} on {DISTRO}")
 if DISTRO not in DEBIAN_DISTROS:
     raise DistError
 
@@ -35,23 +34,34 @@ parser = argparse.ArgumentParser(
 )
 parser.add_argument("-p", "--path", help="The path to the debian package. (in this folder a new folder named: {}"
                                          " will be created and the packages will be downloaded there)", required=True)
+parser.add_argument('-f', '--folder', help="The name of the folder that will store the downloaded packages")
+parser.add_argument('--download-path', help="The path where the download folder will be created")
+parser.add_argument('--force', help="Force overwrite of existing files", action="store_true")
 args = parser.parse_args()
 
+FORCE = args.force
+FOLDER_NAME = "dependencies_python" if not args.folder else args.folder
 URL = "https://packages.debian.org/stretch/amd64/{}/download"
 PACKAGE_PATH = args.path
-TARGET_PATH = ''
-PACKAGE = ''
-if os.path.exists(PACKAGE_PATH):
+TARGET_PATH = None
+if args.download_path:
+    if not os.path.exists(args.download_path):
+        raise PathError
+    TARGET_PATH = args.download_path
+PACKAGE = None
+
+if os.path.exists(PACKAGE_PATH) and not TARGET_PATH:
     split = PACKAGE_PATH.split('/')
     if split[-1].endswith(".deb"):
         PACKAGE_PATH = '/' + '/'.join(split[:-1])
-        TARGET_PATH = os.path.join(split[:-1], NAME)
+        TARGET_PATH = os.path.join(PACKAGE_PATH, FOLDER_NAME)
         PACKAGE = split[-1]
     else:
-        TARGET_PATH = os.path.join(PACKAGE_PATH, NAME)
-        PACKAGE = subprocess.check_output("ls -la %s | awk '{print  $NF}' | grep -oPm1 '.*(?:deb)'" % TARGET_PATH
-                                          , shell=True).decode()
-    if not os.path.isfile(os.path.join(TARGET_PATH, PACKAGE)):
+        TARGET_PATH = os.path.join(PACKAGE_PATH, FOLDER_NAME)
+        PACKAGE = subprocess.check_output("echo -n $(ls -la %s | awk '{print  $NF}' | grep -oPm1 '.*(?:deb)')" % PACKAGE_PATH, shell=True).decode()
+    print(f"Downloading dependencies for: {PACKAGE} \nDownload path: {TARGET_PATH}")
+    if not os.path.isfile(os.path.join(PACKAGE_PATH, PACKAGE)):
+        print(PACKAGE.encode())
         raise FileError
 else:
     raise PathError
@@ -99,16 +109,20 @@ def get_urls_for_multiple_dependencies(dependencies: list):
 
 
 def download_from_url(package_dict: dict):
-    path = os.path.join(TARGET_PATH, package_dict['name'])
+    name = package_dict['name']
+    path = os.path.join(TARGET_PATH, name)
     url = package_dict['url']
     response = requests.get(url)
     if not check_response(response):
         raise BadRequest
-    print(f"Writing to")
-    with open(path, 'wb') as file:
-        for chunk in response.iter_content(chunk_size=16384):
-            if chunk:
-                file.write(chunk)
+    print(f"Writing to: {name}")
+    if not os.path.exists(path) or FORCE:
+        with open(path, 'wb') as file:
+            for chunk in response.iter_content(chunk_size=16384):
+                if chunk:
+                    file.write(chunk)
+    else:
+        print(f"{name} exists, skipping")
 
 
 def download_multiple_files(urls: list):
